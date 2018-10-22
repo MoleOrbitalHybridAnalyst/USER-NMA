@@ -1,6 +1,7 @@
 #include "fix_nma.h"
 
 #include <string.h>
+#include <math.h>
 
 #include "atom.h"
 #include "comm.h"
@@ -10,25 +11,54 @@
 #include "compute.h"
 #include "update.h"
 #include "force.h"
-#include "lmptype.h"
-
-#include "fix_evb.h"
-#include "EVB_engine.h"
-#include "EVB_output.h"
+#include "error.h"
 
 using namespace LAMMPS_NS;
 
 FixNMA::FixNMA(LAMMPS *lmp, int narg, char **arg) :
    Fix(lmp, narg, arg),
-   evoked(false),
-   stride(2),
-   disp(0.005),
+   fix_evb(NULL),
+   stride(0),
+   disp(0.0),
    hess_prefix("hess"),
    natoms(0),
    local_hessian(NULL),
    hessian(NULL)
 {
-   // TODO parse fix to get stride and disp
+   int next = 0;
+   for(int i = 3; i < narg; ++i) {
+      if(!strcmp(arg[i], "stride")) next = 1;
+      else if(next == 1) {
+        sscanf(arg[i], "%ld", &stride);
+        next = 0;
+      }
+      else if(!strcmp(arg[i], "displacement")) next = 2;
+      else if(next == 2) {
+        sscanf(arg[i], "%lf", &disp);
+        next = 0;
+      }
+      else if(!strcmp(arg[i], "outfile")) next = 3;
+      else if(next == 3) {
+        sscanf(arg[i], "%s", hess_prefix);
+        next = 0;
+      }
+      else 
+         error->all(FLERR,
+         "syntax error in fix plumed - use "
+         "'fix id all nma stride ... outfile ... displacement ...' ");
+   }
+   if(next==1) error->all(FLERR, "missing argument for stride option");
+   if(next==2) error->all(FLERR, "missing argument for displacement option");
+
+   if(stride <= 0) error->all(FLERR, "positive stride needed");
+   if(fabs(disp) <= 1e-10) error->all(FLERR, "larger displacement needed");
+
+   if(comm->me == 0 && screen) {
+      fprintf(screen, "[NMA] Do NMA every %ld steps\n", stride);
+      fprintf(screen, "[NMA] Use displacement %lf\n", disp);
+      fprintf(screen, "[NMA] Save hessian with prefix %s\n", hess_prefix);
+   }
+   
 
    natoms = atom->natoms;
    dimsf[0] = dimsf[1] = 3 * natoms;
@@ -40,6 +70,10 @@ FixNMA::FixNMA(LAMMPS *lmp, int narg, char **arg) :
 
    memory->create(local_hessian, 3 * natoms, natoms, 3, "hess");
    memory->create(hessian, 3 * natoms, natoms, 3, "hess");
+
+   EVB_GetFixObj(modify, &fix_evb);
+   if(!fix_evb) 
+      error->all(FLERR, "cannot find fix evb");
 }
 
 FixNMA::~FixNMA()
@@ -66,17 +100,12 @@ void FixNMA::setup(int vflag) {
 
 void FixNMA::pre_force(int vflag) {
 
-   if(evoked) return;
 
    // do not do this at the first timestep
    if(update->firststep == update->ntimestep) return;
 
    if(update->ntimestep % stride) return;
 
-   evoked = true;
-
-   int fix_evb_id = modify->find_fix("1");
-   FixEVB* fix_evb = static_cast<FixEVB*>(modify->fix[fix_evb_id]);
 
    double **fplus = NULL, **fminu = NULL;
    int nlocal = atom->nlocal;
@@ -103,7 +132,6 @@ void FixNMA::pre_force(int vflag) {
             memset(&(atom->f[0][0]), 0, sizeof(double)  * nlocal * 3);
             MPI_Barrier(MPI_COMM_WORLD);
             fix_evb->Engine->execute(vflag);
-            fix_evb->Engine->evb_output->ifreq--;
             memcpy(&(fplus[0][0]), &(atom->f[0][0]), 
                   sizeof(double) * nlocal * 3);
       
@@ -114,7 +142,6 @@ void FixNMA::pre_force(int vflag) {
             memset(&(atom->f[0][0]), 0, sizeof(double)  * nlocal * 3);
             MPI_Barrier(MPI_COMM_WORLD);
             fix_evb->Engine->execute(vflag);
-            fix_evb->Engine->evb_output->ifreq--;
             memcpy(&(fminu[0][0]), &(atom->f[0][0]), 
                   sizeof(double) * nlocal * 3);
       
@@ -165,6 +192,5 @@ void FixNMA::pre_force(int vflag) {
    memset(&(atom->f[0][0]), 0, sizeof(double)  * nlocal * 3);
    fix_evb->Engine->execute(vflag);
 
-   evoked = false;
 }
 

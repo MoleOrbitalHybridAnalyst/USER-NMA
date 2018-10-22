@@ -9,6 +9,7 @@ FixStyle(nma,FixNMA)
 
 #include "fix.h"
 #include "hdf5.h"
+#include "EVB_api.h"
 
 namespace LAMMPS_NS {
 
@@ -21,9 +22,7 @@ class FixNMA : public Fix {
    void setup(int);
    void pre_force(int);
  private:
-   bool evoked;
-
-   //void do_other_pre_force(int);
+   FixEVB* fix_evb;
 
    hid_t hdf5_file, dataset;
    hid_t datatype, dataspace;
