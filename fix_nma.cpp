@@ -14,6 +14,7 @@
 
 #include "fix_evb.h"
 #include "EVB_engine.h"
+#include "EVB_output.h"
 
 using namespace LAMMPS_NS;
 
@@ -43,10 +44,6 @@ FixNMA::FixNMA(LAMMPS *lmp, int narg, char **arg) :
 
 FixNMA::~FixNMA()
 {
-   if(!comm->me) {
-      H5Sclose(dataspace);
-      H5Tclose(datatype);
-   }
    memory->destroy(local_hessian);
    memory->destroy(hessian);
 }
@@ -71,7 +68,12 @@ void FixNMA::pre_force(int vflag) {
 
    if(evoked) return;
 
+   // do not do this at the first timestep
+   if(update->firststep == update->ntimestep) return;
+
    if(update->ntimestep % stride) return;
+
+   evoked = true;
 
    int fix_evb_id = modify->find_fix("1");
    FixEVB* fix_evb = static_cast<FixEVB*>(modify->fix[fix_evb_id]);
@@ -81,71 +83,61 @@ void FixNMA::pre_force(int vflag) {
    memory->create(fplus, nlocal, 3, "fplus");
    memory->create(fminu, nlocal, 3, "fminu");
 
-//   for(int do_rank = 0; do_rank < comm->nprocs; ++do_rank) {
-//
-//      int nlocal_do_rank = 0;
-//      if(comm->me == do_rank) nlocal_do_rank = nlocal;
-//      MPI_Bcast(&nlocal_do_rank, 1, MPI_INT, do_rank, MPI_COMM_WORLD);
-//
-//      for(int ilocal = 0; ilocal < nlocal_do_rank; ++ilocal) {
-//      }
-//   }
+   for(int do_rank = 0; do_rank < comm->nprocs; ++do_rank) {
 
-   {
-   int ilocal = 0;
-   int dim = 0;
-   int do_rank = 0;
+      int nlocal_do_rank = 0;
+      if(comm->me == do_rank) nlocal_do_rank = nlocal;
+      MPI_Bcast(&nlocal_do_rank, 1, MPI_INT, do_rank, MPI_COMM_WORLD);
 
+      for(int ilocal = 0; ilocal < nlocal_do_rank; ++ilocal) {
 
-   int itag = 0;
-   if(comm->me == do_rank) itag = atom->tag[ilocal];
-   MPI_Bcast(&itag, 1, MPI_INT, do_rank, MPI_COMM_WORLD);
-
-
-   evoked = true;
-
-   if(comm->me == do_rank) {
-      atom->x[ilocal][dim] += disp;
-   }
-   MPI_Barrier(MPI_COMM_WORLD);
-// @@@@
-printf("plus barrier passed\n");
-//   modify->pre_force(vflag);
-//   modify->fix[fix_evb_id]->pre_force(vflag);
-   fix_evb->Engine->execute(vflag);
-   memcpy(&(fplus[0][0]), &(atom->f[0][0]), sizeof(double) * nlocal * 3);
-
-// @@@@
-printf("plus preforce passed\n");
-
-   if(comm->me == do_rank) {
-      atom->x[ilocal][dim] -= 2 * disp;
-   }
-   MPI_Barrier(MPI_COMM_WORLD);
-//   modify->pre_force(vflag);
-   fix_evb->Engine->execute(vflag);
-   memcpy(&(fminu[0][0]), &(atom->f[0][0]), sizeof(double) * nlocal * 3);
-
-// @@@@
-printf("minus preforce passed\n");
-
-   // recover original coordinates
-   if(comm->me == do_rank) {
-      atom->x[ilocal][dim] += disp;
-   }
-
-   // collect the hessian
-   double **row = local_hessian[3 * (itag - 1) + dim];
-   for(int jlocal = 0; jlocal < nlocal; ++jlocal) {
-      unsigned id = atom->tag[jlocal] - 1;
-      for(int dim = 0; dim < 3; ++dim) {
-         row[id][dim] =
-            (fplus[jlocal][dim] - fminu[jlocal][dim]) / 2.0 / disp;
-      }
-   }
+         int itag = 0;
+         if(comm->me == do_rank) itag = atom->tag[ilocal];
+         MPI_Bcast(&itag, 1, MPI_INT, do_rank, MPI_COMM_WORLD);
+      
+         for(int dim = 0; dim < 3; ++dim) {
+      
+            if(comm->me == do_rank) {
+               atom->x[ilocal][dim] += disp;
+            }
+            memset(&(atom->f[0][0]), 0, sizeof(double)  * nlocal * 3);
+            MPI_Barrier(MPI_COMM_WORLD);
+            fix_evb->Engine->execute(vflag);
+            fix_evb->Engine->evb_output->ifreq--;
+            memcpy(&(fplus[0][0]), &(atom->f[0][0]), 
+                  sizeof(double) * nlocal * 3);
+      
+      
+            if(comm->me == do_rank) {
+               atom->x[ilocal][dim] -= 2 * disp;
+            }
+            memset(&(atom->f[0][0]), 0, sizeof(double)  * nlocal * 3);
+            MPI_Barrier(MPI_COMM_WORLD);
+            fix_evb->Engine->execute(vflag);
+            fix_evb->Engine->evb_output->ifreq--;
+            memcpy(&(fminu[0][0]), &(atom->f[0][0]), 
+                  sizeof(double) * nlocal * 3);
+      
+      
+            // recover original coordinates
+            if(comm->me == do_rank) {
+               atom->x[ilocal][dim] += disp;
+            }
+      
+            // collect the hessian
+            double **row = local_hessian[3 * (itag - 1) + dim];
+            for(int jlocal = 0; jlocal < nlocal; ++jlocal) {
+               unsigned id = atom->tag[jlocal] - 1;
+               for(int dim = 0; dim < 3; ++dim) {
+                  row[id][dim] =
+                     (fplus[jlocal][dim] - fminu[jlocal][dim]) / 2.0 / disp;
+               }
+            }
+         } // end loop of dim
 
 
-   }
+      } // end loop of ilocal
+   } // end loop of do_rank
 
    memory->destroy(fminu);
    MPI_Reduce(&(local_hessian[0][0][0]), &(hessian[0][0][0]),
@@ -170,7 +162,8 @@ printf("minus preforce passed\n");
    }
 
    // this is the real pre_force
-   modify->pre_force(vflag);
+   memset(&(atom->f[0][0]), 0, sizeof(double)  * nlocal * 3);
+   fix_evb->Engine->execute(vflag);
 
    evoked = false;
 }
