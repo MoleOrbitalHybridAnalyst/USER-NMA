@@ -197,5 +197,3 @@ void FixNMA::pre_force(int vflag) {
 
 }
 
-}
-
