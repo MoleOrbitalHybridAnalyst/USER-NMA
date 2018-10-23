@@ -135,13 +135,6 @@ void FixNMA::pre_force(int vflag) {
             if(force->newton) comm->reverse_comm();
             memcpy(&(fplus[0][0]), &(atom->f[0][0]), 
                   sizeof(double) * nlocal * 3);
-
-for(int jlocal = 0; jlocal < nlocal; ++jlocal) {
-if(atom->tag[jlocal] == 1)
-printf("after (%d, %d) plus f[1] = %lf %lf %lf\n",
-      itag, dim, fplus[jlocal][0], fplus[jlocal][1], fplus[jlocal][2]);
-}
-      
       
             if(comm->me == do_rank) {
                atom->x[ilocal][dim] -= 2 * disp;
@@ -152,12 +145,6 @@ printf("after (%d, %d) plus f[1] = %lf %lf %lf\n",
             if(force->newton) comm->reverse_comm();
             memcpy(&(fminu[0][0]), &(atom->f[0][0]), 
                   sizeof(double) * nlocal * 3);
-      
-for(int jlocal = 0; jlocal < nlocal; ++jlocal) {
-if(atom->tag[jlocal] == 1)
-printf("after (%d, %d) minu f[1] = %lf %lf %lf\n",
-      itag, dim, fminu[jlocal][0], fminu[jlocal][1], fminu[jlocal][2]);
-}
       
             // recover original coordinates
             if(comm->me == do_rank) {
@@ -207,12 +194,6 @@ printf("after (%d, %d) minu f[1] = %lf %lf %lf\n",
    // this is the real pre_force
    memset(&(atom->f[0][0]), 0, sizeof(double)  * nlocal * 3);
    fix_evb->Engine->execute(vflag);
-
-
-for(int jlocal = 0; jlocal < nlocal; ++jlocal) {
-if(atom->tag[jlocal] == 1)
-printf("after real pre force f[1] = %lf %lf %lf\n",
-      atom->f[jlocal][0], atom->f[jlocal][1], atom->f[jlocal][2]);
 
 }
 
