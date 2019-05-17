@@ -47,8 +47,9 @@ FixNMA::FixNMA(LAMMPS *lmp, int narg, char **arg) :
          "syntax error in fix plumed - use "
          "'fix id all nma stride ... outfile ... displacement ...' ");
    }
-   if(next==1) error->all(FLERR, "missing argument for stride option");
-   if(next==2) error->all(FLERR, "missing argument for displacement option");
+   if(next == 1) error->all(FLERR, "missing argument for stride option");
+   if(next == 2) error->all(FLERR, "missing argument for displacement option");
+   if(next == 3) error->all(FLERR, "missing argument for outfile option");
 
    if(stride <= 0) error->all(FLERR, "positive stride needed");
    if(fabs(disp) <= 1e-10) error->all(FLERR, "larger displacement needed");
